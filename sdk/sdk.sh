@@ -105,18 +105,51 @@ cmd_shell() {
     "$TOOLS_IMAGE" bash --login
 }
 
+# The SDK's build.sh exits 0 even when a build hook fails, so a failed build
+# looks like a successful one. Check the artefact the target should produce.
+# Images land in output/firmware (RK_FIRMWARE_DIR); rockdev is only a symlink
+# to it, and mk-firmware.sh creates that symlink, so it is absent until a
+# firmware build has run. They are symlinks into the build trees, so test -e
+# (which follows them) rather than test -f on the link.
+FW=output/firmware
+
+expected_artefact() {
+  case "$1" in
+    rootfs)   echo rootfs.img ;;
+    kernel)   echo boot.img ;;
+    uboot)    echo uboot.img ;;
+    firmware|"") echo update.img ;;
+    *)        echo "" ;;
+  esac
+}
+
 cmd_build() {
   build_tools
   have_sdk || die "no SDK in volume $VOLUME; run ./sdk.sh init <tarball> first"
   local args="$*"
+  local want; want=$(expected_artefact "${1:-}")
+  local before=""
+  if [ -n "$want" ]; then
+    before=$(in_sdk "stat -Lc %Y $FW/$want 2>/dev/null || echo none" 2>/dev/null | tr -d "\r")
+  fi
   in_sdk "./build.sh $args"
+  [ -n "$want" ] || return 0
+  local after
+  after=$(in_sdk "stat -Lc %Y $FW/$want 2>/dev/null || echo none" 2>/dev/null | tr -d "\r")
+  if [ "$after" = "none" ]; then
+    die "build reported success but $FW/$want does not exist"
+  fi
+  if [ "$after" = "$before" ]; then
+    die "build reported success but $FW/$want was not rebuilt"
+  fi
+  in_sdk "ls -lL $FW/$want"
 }
 
 cmd_fetch() {
-  # Default to the three partition images the template replaces. rockdev/ also
-  # holds MiniLoaderAll.bin and parameter.txt, and template/README.md builds
-  # from the vendor image and keeps the vendor loader, so copying all of
-  # rockdev/ over images/ would quietly discard it. `fetch all` opts in.
+  # Default to the three partition images the template replaces.
+  # output/firmware also holds MiniLoaderAll.bin and parameter.txt, and the
+  # build starts from the vendor image and keeps the vendor loader, so copying
+  # all of it over images/ would quietly discard that. `fetch all` opts in.
   local take_all=0
   if [ "${1:-}" = all ]; then take_all=1; shift; fi
   local dest=${1:-../images}
@@ -124,27 +157,27 @@ cmd_fetch() {
   dest=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$dest")
   build_tools
   in_sdk '
-    [ -d /sdk/rockdev ] || { echo "nothing built yet: no rockdev/" >&2; exit 1; }
+    [ -d /sdk/output/firmware ] || { echo "nothing built yet: no output/firmware/" >&2; exit 1; }
     if [ "$TAKE_ALL" = 1 ]; then
-      echo "Taking all of rockdev/, including the SDK loader and parameter.txt."
-      cp -Lv /sdk/rockdev/* /out/
+      echo "Taking all of output/firmware/, including the SDK loader and parameter.txt."
+      cp -Lv /sdk/output/firmware/* /out/
       exit 0
     fi
     copied=0
     for f in uboot.img boot.img rootfs.img; do
-      if [ -f "/sdk/rockdev/$f" ]; then
-        cp -Lv "/sdk/rockdev/$f" /out/
+      if [ -f "/sdk/output/firmware/$f" ]; then
+        cp -Lv "/sdk/output/firmware/$f" /out/
         copied=$((copied + 1))
       else
         echo "not built: $f"
       fi
     done
     if [ "$copied" = 0 ]; then
-      echo "rockdev/ holds none of the three partition images" >&2
+      echo "output/firmware/ holds none of the three partition images" >&2
       exit 1
     fi
     left=""
-    for f in /sdk/rockdev/*; do
+    for f in /sdk/output/firmware/*; do
       b=$(basename "$f")
       case "$b" in
         uboot.img|boot.img|rootfs.img) ;;
@@ -194,8 +227,8 @@ cmd_status() {
     fi
     echo "tree size: $(du -sh /sdk 2>/dev/null | cut -f1)"
     echo
-    if [ -d /sdk/rockdev ]; then echo "rockdev/:"; ls -lL /sdk/rockdev/;
-    else echo "rockdev/: nothing built yet"; fi
+    if [ -d /sdk/output/firmware ]; then echo "output/firmware/:"; ls -lL /sdk/output/firmware/;
+    else echo "output/firmware/: nothing built yet"; fi
   '
 }
 
@@ -225,13 +258,13 @@ Usage: ./sdk.sh <command> [args]
                         rootfs            rebuild rootfs.img
                         kernel            rebuild boot.img
                         uboot             rebuild uboot.img and the loader
-                        firmware          pack rockdev/
+                        firmware          pack output/firmware/
                         buildroot-config  add or remove packages
                         kernel-config     change kernel options
   fetch [dir]         copy uboot.img, boot.img and rootfs.img out to dir
                       (default ../images), keeping the vendor loader and
                       parameter.txt that are already there
-  fetch all [dir]     copy everything in rockdev/, SDK loader included
+  fetch all [dir]     copy all of output/firmware/, SDK loader included
   get <path> [dir]    copy one path out of the SDK tree
   put <file> <path>   copy one file into the SDK tree
   shell               interactive shell in the SDK tree
