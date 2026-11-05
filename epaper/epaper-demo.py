@@ -1,36 +1,35 @@
 #!/usr/bin/env python3
-"""A long-running graphical demo for a Waveshare 2.7inch e-Paper HAT on a
-Luckfox Lyra Zero W.
+"""Graphical demo for a Waveshare 2.7inch e-Paper HAT on a Luckfox Lyra Zero W.
 
-Uses hardware SPI through /dev/spidev1.0 when it is there, and falls back to
-bit-banging GPIO when it is not, so the same script runs on the stock vendor
-image and on firmware built with spi1 enabled. Hardware SPI puts a frame on
-the panel in about 12 ms instead of 15 s.
+Self-contained: it has its own panel code instead of Waveshare's driver. It
+uses hardware SPI through /dev/spidev1.0 when that exists, and bit-bangs sysfs
+GPIO otherwise, so it also runs on the vendor boot.img. A frame takes about
+12 ms over spidev and about 15 s bit-banged.
 
     python3 epaper-demo.py                 # cycle every scene, forever
-    python3 epaper-demo.py --scene life    # just one
-    python3 epaper-demo.py --list          # what is available
-    python3 epaper-demo.py --frames 20     # frames per scene before moving on
-    python3 epaper-demo.py --fast          # V2 only: 1.5s refresh, not 3s
+    python3 epaper-demo.py --scene life    # one scene
+    python3 epaper-demo.py --list          # list scenes
+    python3 epaper-demo.py --frames 20     # frames per scene
+    python3 epaper-demo.py --fast          # V2 only: 1.5 s refresh, not 3 s
     python3 epaper-demo.py --bitbang       # force GPIO, ignore spidev
-    python3 epaper-demo.py --spidev PATH   # use another SPI bus
+    python3 epaper-demo.py --spidev PATH   # use another SPI device
 
-Note that the two transports are mutually exclusive on one boot: enabling spi1
-muxes GPIO0_A6, GPIO0_B0 and GPIO0_B2 away from the GPIO controller, so on
-firmware that has spidev the bit-bang path cannot claim CLK, DIN or CS.
+Only one transport works per boot. spi1 takes GPIO0_A6, GPIO0_B0 and GPIO0_B2
+from the GPIO controller, so with spidev present the bit-bang path can't claim
+CLK, DIN or CS.
 
 Scenes:
-    cube     rotating wireframe cube, hidden-line free, sharp 1-bit edges
+    cube     rotating wireframe cube
     torus    rotating wireframe torus
     life     Conway's Game of Life, seeded with a glider gun
     mandel   Mandelbrot zoom, Floyd-Steinberg dithered
     julia    animated Julia set, dithered
-    plasma   classic demoscene plasma, dithered
+    plasma   plasma effect, dithered
     balls    metaballs, threshold shaded
     tunnel   rotating tunnel
     photo    a dithered still, wiped in a band at a time
 
-Ctrl-C puts the panel to sleep and exits cleanly.
+Ctrl-C puts the panel to sleep and exits.
 """
 
 import argparse
@@ -54,10 +53,9 @@ BUSY_TIMEOUT = 25.0
 BUSY_ASSERT_TIMEOUT = 0.5
 GPIO = "/sys/class/gpio"
 
-# spi1 in the device tree is the controller on the 40-pin header: CLK on
-# GPIO0_B0 (pin 23), MOSI on GPIO0_A6 (pin 19) and CSn0 on GPIO0_B2 (pin 24),
-# which are the three pins the HAT wants. of_alias_get_id gives it bus 1 from
-# the aliases node, so its chip select 0 appears as /dev/spidev1.0.
+# spi1 drives the 40-pin header: CLK on GPIO0_B0 (pin 23), MOSI on GPIO0_A6
+# (pin 19), CSn0 on GPIO0_B2 (pin 24). The aliases node makes it bus 1, so
+# chip select 0 is /dev/spidev1.0.
 SPIDEV = "/dev/spidev1.0"
 SPI_HZ = 4000000
 
@@ -66,13 +64,10 @@ SPI_IOC_WR_MODE = 0x40016B01
 SPI_IOC_WR_BITS_PER_WORD = 0x40016B03
 SPI_IOC_WR_MAX_SPEED_HZ = 0x40046B04
 
-# --- sysfs GPIO numbering ------------------------------------------------
-# /sys/class/gpio/gpioN numbers are a global allocation handed out in gpiochip
-# probe order, not a stable property of a pin. Enabling an SPI controller can
-# reorder probing and shift every number, which silently points RST, DC, PWR
-# and BUSY at the wrong pins while CLK/MOSI/CS keep working because pinctrl
-# muxes those by name. So the PIN table below holds bank-0 offsets, which are
-# stable, and the sysfs number is resolved at run time.
+# The kernel assigns /sys/class/gpio numbers in probe order. Enabling spi1
+# shifts them, which moves RST, DC, PWR and BUSY onto the wrong pins while the
+# spi1 pins keep working. PIN holds bank-0 offsets, converted to sysfs numbers
+# at run time.
 
 def gpiochips():
     out = []
@@ -103,7 +98,7 @@ def bank0_base():
     for label, base, _, _ in chips:
         if label == "gpio0":
             return base
-    # Older kernels label banks by DT node name; take the lowest-based 32-pin chip.
+    # Some kernels label banks by DT node name. Take the lowest 32-line chip.
     banks = sorted(b for _, b, n, _ in chips if n == 32)
     return banks[0] if banks else 0
 
@@ -160,9 +155,8 @@ class Pin:
 class BitBangBus:
     """SPI clocked out of sysfs GPIO, one file write per edge.
 
-    The only transport available on the stock vendor image, where nothing in
-    the device tree claims the panel's CLK, DIN and CS pins. About 15 s for a
-    5808-byte frame, so the bus, not the panel, sets the frame rate.
+    Works on the vendor image, where no device tree node claims CLK, DIN and
+    CS. A 5808-byte frame takes about 15 s.
     """
 
     def __init__(self):
@@ -191,10 +185,9 @@ class BitBangBus:
 
 
 class SpidevBus:
-    """Hardware SPI through a spidev character device.
+    """Hardware SPI through a spidev device.
 
-    The controller generates the clock and drives chip select, so CS is no
-    longer a GPIO. A frame goes out in about 12 ms.
+    The controller drives the clock and chip select. A frame takes about 12 ms.
     """
 
     def __init__(self, path, hz=SPI_HZ):
@@ -211,11 +204,9 @@ class SpidevBus:
             fcntl.ioctl(self.fd, SPI_IOC_WR_MAX_SPEED_HZ, struct.pack("<I", hz))
         except OSError as e:
             die("%s: cannot configure the bus: %s" % (path, e))
-        # spidev rejects a write longer than its bufsiz module parameter,
-        # 4096 bytes by default, so a frame leaves in chunks. CS rises between
-        # them, which this panel accepts: each byte is latched on its own eight
-        # clocks, and the bit-bang path proved both patterns work on hardware,
-        # raising CS per byte for commands and holding it low for a whole frame.
+        # spidev rejects writes longer than its bufsiz parameter (4096 bytes
+        # by default), so send the frame in chunks. CS rises between chunks.
+        # The panel latches each byte on its own 8 clocks, so that's fine.
         self.chunk = 4096
         try:
             with open("/sys/module/spidev/parameters/bufsiz") as f:
@@ -230,8 +221,7 @@ class SpidevBus:
         i, n, chunk = 0, len(mv), self.chunk
         while i < n:
             j = i + chunk if i + chunk < n else n
-            # A short write is possible in principle; spidev never does one,
-            # but advancing by the returned count costs nothing.
+            # spidev doesn't return short writes. Advance by the count anyway.
             i += os.write(self.fd, mv[i:j])
 
     def close(self):
@@ -242,7 +232,7 @@ class SpidevBus:
 
 
 def open_bus(bitbang=False, path=None):
-    """Hardware SPI if this firmware offers it, GPIO otherwise."""
+    """Hardware SPI if the spidev device exists, bit-banged GPIO otherwise."""
     if bitbang:
         return BitBangBus()
     if path:
@@ -285,14 +275,11 @@ class Panel:
         return not self.busy.get()
 
     def wait(self, what="panel"):
-        """Wait for the panel to start, then to finish.
+        """Wait for BUSY to assert, then to clear.
 
-        Waiting only for idle is a race. The panel takes a moment to assert
-        BUSY after a trigger command, and over hardware SPI that command
-        leaves in microseconds -- fast enough to read the stale idle level and
-        return before the panel has begun. Bit-banging hid this because
-        clocking a byte through sysfs took milliseconds. So poll for BUSY to
-        assert first, then for it to clear.
+        Over spidev the trigger command finishes in microseconds, before the
+        panel asserts BUSY. Polling only for idle reads the stale idle level
+        and returns early.
         """
         t0 = time.time()
         started = False
@@ -302,8 +289,8 @@ class Panel:
                 break
             time.sleep(0.001)
         if not started:
-            # Either the refresh was shorter than the poll, or nothing is
-            # listening. Say so rather than report a silent success.
+            # The refresh finished inside one poll, or no panel is connected.
+            # Report it instead of claiming success.
             self.never_busy += 1
         while True:
             if not self.busy_now():
@@ -315,12 +302,11 @@ class Panel:
             time.sleep(0.02)
 
     def reset(self):
-        """Waveshare's epd2in7_V2 timing: 200 ms, low 2 ms, then 200 ms settle.
+        """Reset with Waveshare's epd2in7_V2 timing: 200 ms high, 2 ms low,
+        200 ms high.
 
-        The settle after releasing RST is the part that matters -- the panel
-        does its internal power-on there, and commands sent before it finishes
-        are ignored. Shorter delays appeared to work only because bit-banging
-        a frame took seconds.
+        The panel powers on internally during the last 200 ms and ignores
+        commands sent before that finishes.
         """
         self.rst.set(1); time.sleep(0.2)
         self.rst.set(0); time.sleep(0.002)
@@ -338,9 +324,10 @@ class Panel:
         return True
 
     def _init_v2_fast(self):
-        """Fast update is not just a different refresh byte. The panel has to
-        load its temperature value and be told to use the 1.5s waveform, or
-        0xC7 does nothing useful."""
+        """Select the 1.5 s fast waveform.
+
+        The panel must load its temperature value and select the waveform
+        first. Sending refresh byte 0xC7 alone doesn't give a fast update."""
         if not self.wait("after reset"):
             return False
         self.cmd(0x12)
@@ -384,9 +371,8 @@ class Panel:
         return True
 
     def full_pass(self, buf):
-        """One full-waveform refresh. The fast waveform leaves remnants of
-        earlier frames; a full pass clears them. Switching waveform means
-        re-running init, because the waveform is selected there."""
+        """One refresh with the full waveform, to clear the ghosting the fast
+        waveform leaves. init selects the waveform, so this re-runs init."""
         if not self.v2:
             return self.show(buf)
         was, self.fast = self.fast, False
@@ -399,16 +385,16 @@ class Panel:
         return ok
 
     def scrub(self):
-        """White, black, white at full waveform. Slow, but it resets the
-        panel state when ghosting has built up."""
+        """White, black, white with the full waveform. Slow. Clears built-up
+        ghosting."""
         for fill in (0xFF, 0x00, 0xFF):
             self.full_pass(bytearray([fill]) * FB)
 
     def show(self, buf):
         if self.v2:
-            # The address counters sit wherever the last write left them, so
-            # every frame after the first lands in the wrong place unless they
-            # are rewound. The panel spec lists 0x4E and 0x4F before 0x24.
+            # The address counters stay where the last write left them. Rewind
+            # them with 0x4E and 0x4F before 0x24, or later frames land in the
+            # wrong place.
             self.cmd(0x4E); self.data(0x00)
             self.cmd(0x4F); self.data(0x00, 0x00)
             self.cmd(0x24)
@@ -747,83 +733,95 @@ def scene_tunnel(c, n):
 
 
 # ---------------------------------------------------------------- photo
-# A 176x264 Floyd-Steinberg dithered still, zlib + base64. Decoded once on
-# first use; bit set is white, matching the canvas.
+# photos/lenna.png, Floyd-Steinberg dithered to 1 bit, zlib + base64. Bit set
+# is white, matching the canvas.
 PHOTO_B64 = """\
-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"""
+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
+SE9Q2u4R3TDuOngLHDG1yOYmkiryfw+DjZ8="""
 
 _photo = None
 
@@ -985,8 +983,8 @@ def main():
     finally:
         print("\n%d frames shown, sleeping the panel" % shown)
         if panel.never_busy:
-            print("BUSY never asserted on %d of them -- those frames did not "
-                  "reach the panel" % panel.never_busy)
+            print("BUSY never asserted on %d of them. Those frames probably "
+                  "didn't reach the panel." % panel.never_busy)
         panel.sleep()
         bus.close()
     return 0
