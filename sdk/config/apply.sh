@@ -1,9 +1,5 @@
 #!/bin/sh
-# Reapply this repo's changes to a freshly initialised SDK.
-#
-# ./sdk.sh init leaves a pristine SDK in the Docker volume. Everything here
-# lives outside it, so ./sdk.sh clean loses nothing that cannot be put back.
-# Idempotent: safe to run twice.
+# Reapply this repo's SDK changes after ./sdk.sh init. Safe to run twice.
 set -e
 
 DTS=kernel-6.1/arch/arm/boot/dts/rk3506b-luckfox-lyra-zero-w.dts
@@ -11,7 +7,7 @@ DEFCONFIG=buildroot/configs/rockchip_rk3506_luckfox_defconfig
 
 cd /sdk
 
-# 1. SPI1 on the 40-pin header, for the e-paper HAT.
+# SPI1 on the 40-pin header, for the e-paper HAT.
 if grep -q "rm_io8_spi1_clk" "$DTS"; then
   echo "dts: spi1 already routed, skipping"
 else
@@ -20,7 +16,7 @@ else
   echo "dts: spi1 routed onto the HAT's pins"
 fi
 
-# 2. Buildroot mirrors and the root filesystem overlay.
+# Buildroot mirrors and the root filesystem overlay.
 if grep -q "ftpmirror.gnu.org" "$DEFCONFIG"; then
   echo "defconfig: already patched, skipping"
 else
@@ -28,7 +24,12 @@ else
   echo "defconfig: mirrors and overlay set"
 fi
 
-# 3. The overlay itself.
+# Earlier versions of the fragment used = and dropped the vendor overlays.
+if grep -q '^BR2_ROOTFS_OVERLAY="/sdk/lyra-overlay"' "$DEFCONFIG"; then
+  sed -i 's|^BR2_ROOTFS_OVERLAY="/sdk/lyra-overlay"|BR2_ROOTFS_OVERLAY+="/sdk/lyra-overlay"|' "$DEFCONFIG"
+  echo "defconfig: overlay now appends to the vendor list"
+fi
+
 mkdir -p /sdk/lyra-overlay
 if [ -d /config/overlay ]; then
   cp -a /config/overlay/. /sdk/lyra-overlay/
@@ -36,4 +37,4 @@ if [ -d /config/overlay ]; then
 fi
 
 echo
-echo "Applied. Build with ./sdk.sh build  (uboot, kernel, rootfs, firmware in order)."
+echo "Build with ./sdk.sh build"
