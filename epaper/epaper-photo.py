@@ -59,8 +59,9 @@ def gallery():
     """What is in photos/, in a stable order."""
     if not os.path.isdir(PHOTOS):
         return []
+    # Skip dotfiles: macOS tar adds ._name AppleDouble files that aren't images.
     return sorted(os.path.splitext(f)[0] for f in os.listdir(PHOTOS)
-                  if f.lower().endswith(EXTS))
+                  if f.lower().endswith(EXTS) and not f.startswith("."))
 
 
 def resolve(name):
