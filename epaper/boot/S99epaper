@@ -1,0 +1,35 @@
+#!/bin/sh
+#
+# S99epaper    Draws on the 2.7inch e-Paper HAT at boot.
+#
+# S99 so it runs last, once udev has made /dev/spidev1.0 and /dev/gpiochip0.
+# Exits by itself if no panel answers, so a board with nothing attached boots
+# normally.
+
+DIR=/usr/share/epaper
+SCRIPT=$DIR/epaper-show.py
+ARGS="--mode partial"
+
+[ -f "$SCRIPT" ] || exit 0
+[ -r /etc/default/epaper ] && . /etc/default/epaper
+
+case "$1" in
+  start)
+    printf "Starting e-Paper demo: "
+    cd "$DIR" && start-stop-daemon -S -b -m -p /var/run/epaper.pid \
+      -x /usr/bin/python3 -- "$SCRIPT" $ARGS
+    echo "OK"
+    ;;
+  stop)
+    printf "Stopping e-Paper demo: "
+    start-stop-daemon -K -q -p /var/run/epaper.pid
+    echo "OK"
+    ;;
+  restart|reload)
+    "$0" stop; sleep 1; "$0" start
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+    ;;
+esac

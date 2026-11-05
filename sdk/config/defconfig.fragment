@@ -1,0 +1,15 @@
+# Appended to buildroot/configs/rockchip_rk3506_luckfox_defconfig by apply.sh.
+#
+# Files to add to the root filesystem. /sdk/lyra-overlay is created by
+# apply.sh from sdk/overlay/ in this repo.
+BR2_ROOTFS_OVERLAY="/sdk/lyra-overlay"
+
+# The SDK ships BR2_GNU_MIRROR="https://mirrors.ustc.edu.cn/gnu", which
+# returns 403 to wget outside China, with BR2_BACKUP_SITE empty so nothing
+# catches it. The build then dies at host-make with a download failure that
+# looks like a broken package.
+BR2_GNU_MIRROR="https://ftpmirror.gnu.org"
+
+# Catches packages whose upstream has moved. zlib is the common one: zlib.net
+# moves old releases to /fossils/ and 404s the versioned path.
+BR2_BACKUP_SITE="https://sources.buildroot.net"

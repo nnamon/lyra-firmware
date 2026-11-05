@@ -26,7 +26,8 @@ Luckfox's own pages are the reference:
 | `sdk/` | runs the Luckfox SDK in Docker | yes |
 | `rootfs/` | unpacks and repacks `rootfs.img`, a UBI image | no: the SDK cannot edit a built filesystem |
 | `rootfs/cross/` | cross-compiles for the board and checks the ABI | no: should prefer the SDK toolchain when one is present |
-| `rootfs/epaper/` | a 2.7inch e-Paper HAT demo that starts at boot | no |
+| `epaper/` | drives a 2.7inch e-Paper HAT, on Waveshare's own driver | no |
+| `sdk/config/` | this repo's changes to the SDK tree, reapplied by `./sdk.sh apply` | yes |
 | `build.sh`, `image.conf` | packs an `update.img` from loose partition images | duplicates `sdk.sh build firmware`, which is authoritative |
 
 [docs/linux.md](docs/linux.md) compares the routes and says which to use when.
@@ -51,8 +52,8 @@ a Docker volume rather than a directory. See [sdk/README.md](sdk/README.md).
 
 A pin that no enabled device tree node claims is already usable as GPIO. A
 userspace driver on those pins needs no firmware change and cannot stop the
-board booting. `rootfs/epaper/` works that way, which is why it runs on an
-unmodified vendor `boot.img`.
+board booting. `epaper/epaper-demo.py` works that way, which is why it runs
+on an unmodified vendor `boot.img`.
 
 Read `/sys/kernel/debug/pinctrl/` on a running board to see what is claimed.
 
@@ -69,24 +70,32 @@ Checking that repository out beside this one works too.
 
 ## Verification status
 
-Checked against real hardware or real vendor artefacts:
+Confirmed on a real board:
 
-- `rootfs/ubifs.sh` round-trips a real vendor `rootfs.img`: 7263 entries
-  identical, including modes, owners, link counts, device numbers and
-  contents, and the repacked image is the same size.
+- `sdk/` builds a `boot.img` that boots. Written to sector `0x4000` on a Lyra
+  Zero W, `uname` reports the SDK kernel and `dd ... | md5sum` of the
+  partition matches the file exactly.
+- `sdk/config/0001-spi1-epaper.patch` gives `/dev/spidev1.0`, with
+  `spi@ff130000` `okay` and the three `rm_io` groups claimed, checked in
+  `/sys/kernel/debug/pinctrl/`.
+- `epaper/` draws on a 2.7inch HAT, in 1-bit and in 4 grey levels.
 - `rootfs/cross/cross.sh` produces binaries whose ELF flags and interpreter
   match the board's own `busybox`, and they run under emulation against the
   board's real glibc 2.38.
-- The SDK's own `check-sdk.sh` and `check-buildroot.sh` both pass inside the
-  `sdk/` container.
+- The SDK's own `check-sdk.sh` and `check-buildroot.sh` pass in the `sdk/`
+  container.
 
-Not checked:
+Known bad, do not use for images you intend to flash:
 
-- A full `./sdk.sh build` has never been run. Expect to add a missing apt
-  package or two on the first attempt.
-- `rootfs/epaper/` has never met a panel. The command sequences are
-  Waveshare's and the pin mapping comes from the datasheet and the board
-  pinout, but no frame has been drawn on glass.
+- `rootfs/ubifs.sh`. It round-trips a vendor `rootfs.img` with all 7263
+  entries identical, and the image it repacks **does not boot**. Comparing
+  extracted file trees says nothing about whether the kernel can mount the
+  result. Inspection only.
+- `build.sh` / `image.conf`, which pack an `update.img` by hand. Prefer
+  `./sdk.sh build firmware`.
+- A full SDK-built `update.img` does not boot either; the fault is in
+  `uboot.img` or `rootfs.img`, not `boot.img`, which is proven good on its
+  own. Unresolved.
 
 Previously tried and removed: a tool that repacked the `boot.img` FIT by hand
 to enable SPI. The image it produced did not boot. Device tree changes belong

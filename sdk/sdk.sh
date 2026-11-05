@@ -95,7 +95,7 @@ cmd_init() {
   ' -v "$tgz:/in/sdk.tar.gz:ro"
 
   echo
-  echo "Ready. Next: ./sdk.sh build   (hours on a first build)"
+  echo "Ready. Next: ./sdk.sh apply, then ./sdk.sh build  (hours on a first build)"
 }
 
 cmd_shell() {
@@ -143,6 +143,15 @@ cmd_build() {
     die "build reported success but $FW/$want was not rebuilt"
   fi
   in_sdk "ls -lL $FW/$want"
+}
+
+cmd_apply() {
+  build_tools
+  have_sdk || die "no SDK in volume $VOLUME; run ./sdk.sh init <tarball> first"
+  # The script cd'd to its own directory at the top, so this is beside it.
+  local cfg; cfg=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' config)
+  [ -d "$cfg" ] || die "no config directory at $cfg"
+  in_sdk "sh /config/apply.sh" -v "$cfg:/config:ro"
 }
 
 cmd_fetch() {
@@ -253,6 +262,8 @@ Usage: ./sdk.sh <command> [args]
   init <sdk.tar.gz>   extract the SDK into the work volume, check out the
                       working tree from .repo, and select the Zero W SPI NAND
                       Buildroot config
+  apply               reapply this repo's SDK changes (device tree, mirrors,
+                      root filesystem overlay). Run after init; idempotent
   build [target]      run ./build.sh in the SDK. With no target, build
                       everything. Useful targets:
                         rootfs            rebuild rootfs.img
@@ -280,6 +291,7 @@ USAGE
 
 case "${1:-}" in
   init)   shift; cmd_init "$@" ;;
+  apply)  shift; cmd_apply "$@" ;;
   build)  shift; cmd_build "$@" ;;
   fetch)  shift; cmd_fetch "$@" ;;
   get)    shift; cmd_get "$@" ;;

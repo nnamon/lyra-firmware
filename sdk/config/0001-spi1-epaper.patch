@@ -1,0 +1,34 @@
+--- rk3506b-luckfox-lyra-zero-w.dts.orig	2026-11-04 20:05:56.596272333 +0000
++++ rk3506b-luckfox-lyra-zero-w.dts	2026-11-04 20:05:56.782245000 +0000
+@@ -132,3 +132,31 @@
+ &wdt1 {
+         status = "okay";
+ };
++
++/**********e-paper HAT on the 40-pin header**********/
++/*
++ * The Lyra header is Raspberry Pi pin-compatible, so a Pi HAT seats directly,
++ * but SPI1's default pins are not where the Pi puts MOSI and CE0. Route SPI1
++ * through the RM_IO matrix onto the pins a seated HAT actually drives:
++ *
++ *   HAT    Pi pin  Lyra pin   matrix group
++ *   CLK    23      GPIO0_B0   rm_io8_spi1_clk
++ *   DIN    19      GPIO0_A6   rm_io6_spi1_mosi
++ *   CS     24      GPIO0_B2   rm_io10_spi1_csn0
++ *
++ * MISO is left unrouted: the panel is write-only and the HAT does not drive
++ * pin 21, so GPIO0_A7 stays available as a GPIO.
++ *
++ * DC, RST, BUSY and PWR stay plain GPIOs: 11, 3, 12 and 14.
++ */
++&spi1 {
++	status = "okay";
++	pinctrl-names = "default";
++	pinctrl-0 = <&rm_io8_spi1_clk &rm_io6_spi1_mosi &rm_io10_spi1_csn0>;
++
++	spidev@0 {
++		compatible = "rockchip,spidev";
++		reg = <0>;
++		spi-max-frequency = <4000000>;
++	};
++};
