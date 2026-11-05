@@ -7,17 +7,18 @@
 # normally.
 
 DIR=/usr/share/epaper
-SCRIPT=$DIR/epaper-show.py
+SCRIPT=epaper-show.py
 ARGS="--mode partial"
 
-[ -f "$SCRIPT" ] || exit 0
+# Source first, so /etc/default/epaper can choose a different SCRIPT.
 [ -r /etc/default/epaper ] && . /etc/default/epaper
+[ -f "$DIR/$SCRIPT" ] || exit 0
 
 case "$1" in
   start)
     printf "Starting e-Paper demo: "
     cd "$DIR" && start-stop-daemon -S -b -m -p /var/run/epaper.pid \
-      -x /usr/bin/python3 -- "$SCRIPT" $ARGS
+      -x /usr/bin/python3 -- "$DIR/$SCRIPT" $ARGS
     echo "OK"
     ;;
   stop)

@@ -10,7 +10,9 @@ ours.
 | `waveshare_epd/epd2in7_V2.py` | upstream, verbatim, sha256 `171bdc77a035f749782c78d2a513b7c3c987c9157ae39e7c0123e74e933b8a44` |
 | `waveshare_epd/epdconfig.py` | ours: GPIO and SPI for this board |
 | `epaper-show.py` | nine animated scenes |
-| `epaper-photo.py` | a photo in 4 grey levels or 1 bit, dithered on the board |
+| `epaper-photo.py` | pictures in 4 grey levels or 1 bit, dithered on the board |
+| `prep-photo.py` | fits a picture to 176x264 greyscale, on your machine |
+| `photos/` | the gallery. Gitignored: this repository is public |
 | `epaper-levels.py` | the four grey levels as bands, for calibration |
 | `epaper-diag.py` | staged hardware diagnosis when nothing appears |
 | `epaper-demo.py` | older, self-contained, bit-bangs SPI from GPIO |
@@ -41,10 +43,34 @@ GPIO controller.
 
 ```sh
 python3 epaper-show.py                  # cycle every scene
-python3 epaper-photo.py                 # 4 grey levels, Atkinson dither
+python3 epaper-photo.py                 # every picture in photos/, once
+python3 epaper-photo.py --loop          # ... round and round
+python3 epaper-photo.py --list          # what is in photos/
+python3 epaper-photo.py sleeve          # one of them
+python3 epaper-photo.py any.jpg         # any file, fitted to 176x264
 python3 epaper-photo.py --dither floyd  # Floyd-Steinberg instead
 python3 epaper-levels.py                # calibration bands
 ```
+
+## The gallery
+
+`photos/` ships empty, and its `.gitignore` keeps it that way: this
+repository is public and your pictures are not. Fill it on your machine.
+
+```sh
+./prep-photo.py ~/pics/*.jpg          # -> photos/<name>.png, 176x264 grey
+./prep-photo.py --fit cover tall.jpg  # crop to fill instead of padding
+./prep-photo.py --plain scan.png      # leave the tones alone
+```
+
+`epaper-photo.py` will open a full-size file directly and fit it on the
+board, so `prep-photo.py` is a convenience, not a requirement. It earns its
+place by making the copy on the board 10-20 KB instead of megabytes, and by
+baking the contrast decision in once rather than every refresh.
+
+Contrast is a prep-time decision for that reason: prepared pictures are
+autocontrasted and want a neutral gamma. `GAMMA` in `epaper-photo.py` holds
+per-picture exceptions, and `--gamma` overrides both.
 
 ## Wiring
 
@@ -71,7 +97,9 @@ changes.
 mkdir -p ../sdk/config/overlay/usr/share/epaper \
          ../sdk/config/overlay/etc/init.d \
          ../sdk/config/overlay/etc/default
-cp -r waveshare_epd epaper-show.py ../sdk/config/overlay/usr/share/epaper/
+cp -r waveshare_epd photos epaper-show.py epaper-photo.py \
+      ../sdk/config/overlay/usr/share/epaper/
+rm -f ../sdk/config/overlay/usr/share/epaper/photos/.gitignore
 cp boot/S99epaper      ../sdk/config/overlay/etc/init.d/
 cp boot/epaper.default ../sdk/config/overlay/etc/default/epaper
 cd ../sdk && ./sdk.sh apply && ./sdk.sh build rootfs

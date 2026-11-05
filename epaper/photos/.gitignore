@@ -1,0 +1,4 @@
+# Your pictures, not the repo's. lyra-firmware is public; nothing dropped
+# in here is committed. prep-photo.py fills this directory.
+*
+!.gitignore

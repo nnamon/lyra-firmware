@@ -1,9 +1,11 @@
 # Options for /etc/init.d/S99epaper.
 #
-# ARGS is passed to epaper-show.py. See its --help.
-#   --mode partial   no flash between frames (default)
-#   --mode fast      full refresh, fast waveform
-#   --mode full      full refresh, normal waveform
-#   --scene NAME     run one scene instead of cycling
-#   --frames N       frames per scene
+# SCRIPT is the demo to run, from /usr/share/epaper.
+#   epaper-show.py    nine animated scenes (default)
+#   epaper-photo.py   the photo gallery
+SCRIPT=epaper-show.py
+
+# ARGS is passed to it. See its --help.
+#   epaper-show.py    --mode partial|fast|full, --scene NAME, --frames N
+#   epaper-photo.py   --all --loop --pause N, --dither, --gamma
 ARGS="--mode partial"
