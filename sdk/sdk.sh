@@ -7,9 +7,8 @@ TOOLS_IMAGE=lyra-sdk-tools
 VOLUME=${LYRA_SDK_VOLUME:-lyra-sdk}
 PLATFORM=linux/amd64
 
-# Selected non-interactively, because ./build.sh accepts a defconfig name and
-# that is less fragile than feeding numbers into the lunch menu. This one is
-# the Zero W on SPI NAND with Buildroot, the same as lunch options 4, 1, 0.
+# Zero W, SPI NAND, Buildroot. Passed by name instead of lunch menu numbers
+# (4, 1, 0).
 DEFCONFIG=luckfox_lyra_zero-w_buildroot_spinand_defconfig
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -47,9 +46,8 @@ cmd_init() {
   build_tools
   docker volume create "$VOLUME" >/dev/null
 
-  # The Lyra tarball ships only the .repo mirror, so the checkout has to run
-  # before anything looks for build.sh. That is the order the vendor wiki
-  # gives: tar, then `.repo/repo/repo sync -l`.
+  # The tarball holds only the .repo mirror. Check out with
+  # `.repo/repo/repo sync -l` before looking for build.sh, as the wiki says.
   in_sdk '
     sudo chown "$(id -u):$(id -g)" /sdk
     if [ -f /sdk/build.sh ] || [ -d /sdk/.repo ]; then
@@ -105,12 +103,10 @@ cmd_shell() {
     "$TOOLS_IMAGE" bash --login
 }
 
-# The SDK's build.sh exits 0 even when a build hook fails, so a failed build
-# looks like a successful one. Check the artefact the target should produce.
-# Images land in output/firmware (RK_FIRMWARE_DIR); rockdev is only a symlink
-# to it, and mk-firmware.sh creates that symlink, so it is absent until a
-# firmware build has run. They are symlinks into the build trees, so test -e
-# (which follows them) rather than test -f on the link.
+# The SDK's build.sh exits 0 when a build hook fails, so check the image the
+# target should produce. Use output/firmware (RK_FIRMWARE_DIR): rockdev is a
+# symlink that only exists after a firmware build. The images are symlinks
+# too, so stat -L.
 FW=output/firmware
 
 expected_artefact() {
@@ -155,10 +151,8 @@ cmd_apply() {
 }
 
 cmd_fetch() {
-  # Default to the three partition images the template replaces.
-  # output/firmware also holds MiniLoaderAll.bin and parameter.txt, and the
-  # build starts from the vendor image and keeps the vendor loader, so copying
-  # all of it over images/ would quietly discard that. `fetch all` opts in.
+  # Copy only the three partition images, so the vendor MiniLoaderAll.bin and
+  # parameter.txt in images/ survive. `fetch all` takes the SDK's too.
   local take_all=0
   if [ "${1:-}" = all ]; then take_all=1; shift; fi
   local dest=${1:-../images}
@@ -242,8 +236,8 @@ cmd_status() {
 }
 
 cmd_clean() {
-  # Docker reports the volume as still in use for a moment after a --rm
-  # container exits, so retry rather than fail on the race.
+  # Docker reports the volume in use for a moment after a --rm container
+  # exits. Retry instead of failing.
   local i
   for i in 1 2 3 4 5; do
     if docker volume rm -f "$VOLUME" >/dev/null 2>&1; then

@@ -1,41 +1,34 @@
-"""Luckfox Lyra Zero W platform glue for Waveshare's waveshare_epd drivers.
+"""Luckfox Lyra Zero W platform module for Waveshare's waveshare_epd drivers.
 
-Drop-in replacement for upstream epdconfig.py, which only supports Raspberry
-Pi and Jetson (RPi.GPIO, gpiozero, lgpio, Jetson.GPIO -- none of which exist
-on this board). The panel drivers in this package are upstream and unmodified;
-everything board-specific lives here.
+Replaces upstream epdconfig.py, which supports only Raspberry Pi and Jetson
+GPIO libraries. The panel drivers in this package are upstream, unmodified.
 
-Interface the drivers rely on, and nothing more:
+The drivers use only these names:
     RST_PIN DC_PIN CS_PIN BUSY_PIN
     module_init() module_exit()
     digital_write(pin, value) digital_read(pin) delay_ms(ms)
     spi_writebyte(list_of_bytes)
 
-Two deliberate differences from a Raspberry Pi:
+GPIO goes through /dev/gpiochip0 line offsets, not /sys/class/gpio numbers.
+The kernel assigns sysfs numbers in probe order. Enabling spi1 shifts them and
+moves RST, DC, PWR and BUSY onto the wrong pins.
 
-  * GPIO goes through /dev/gpiochip0 line offsets, not /sys/class/gpio
-    numbers. sysfs numbers are a global allocation handed out in gpiochip
-    probe order, so they are not a property of a pin -- enabling an SPI
-    controller can shift them all and silently move RST, DC, PWR and BUSY to
-    the wrong pins. A character-device line offset is stable by construction.
+The SPI controller drives chip select, so digital_write(CS_PIN, ...) does
+nothing. Upstream's gpiozero path does the same.
 
-  * Chip select is driven by the SPI controller, so digital_write(CS_PIN, ...)
-    is a no-op. Upstream does the same on the gpiozero path, where
-    GPIO_CS_PIN is commented out.
-
-Pin numbers below are gpiochip0 line offsets, which for Rockchip means
-bank 0: GPIO0_A<n> is n, GPIO0_B<n> is 8+n, GPIO0_C<n> is 16+n.
+Pins are gpiochip0 line offsets. On Rockchip bank 0, GPIO0_A<n> is n,
+GPIO0_B<n> is 8+n and GPIO0_C<n> is 16+n.
 
     HAT    Pi pin  Lyra            offset
     RST    11      GPIO0_A3        3
     PWR    12      GPIO0_B6        14
     BUSY   18      GPIO0_B4        12
     DC     22      GPIO0_B3        11
-    CS     24      GPIO0_B2        24 -> spi1 csn0, not a GPIO
-    DIN    19      GPIO0_A6        -> spi1 mosi
-    CLK    23      GPIO0_B0        -> spi1 clk
+    CS     24      GPIO0_B2        spi1 csn0
+    DIN    19      GPIO0_A6        spi1 mosi
+    CLK    23      GPIO0_B0        spi1 clk
 
-Requires spi1 enabled in the device tree so /dev/spidev1.0 exists.
+Needs /dev/spidev1.0, from a boot.img with spi1 enabled.
 """
 
 import errno
@@ -47,7 +40,7 @@ import time
 
 import spidev
 
-# Pin identifiers. The values are gpiochip0 line offsets; CS is a token only.
+# gpiochip0 line offsets. CS_PIN is a placeholder.
 RST_PIN = 3
 PWR_PIN = 14
 BUSY_PIN = 12
@@ -59,11 +52,10 @@ SPI_BUS, SPI_DEV = 1, 0          # /dev/spidev1.0
 SPI_HZ = 4000000
 SPI_MODE = 0b00
 
-# --- /dev/gpiochip ABI ---------------------------------------------------
-# Verified against kernel 6.1 include/uapi/linux/gpio.h and sized with the
-# compiler: line_request is 592 bytes with config at 288, num_lines at 560 and
-# fd at 588; line_values is 16. Every field is fixed-width and __aligned_u64,
-# so the layout is identical on 32-bit ARM and 64-bit x86.
+# GPIO v2 character device ABI, from kernel 6.1 include/uapi/linux/gpio.h.
+# struct gpio_v2_line_request is 592 bytes, with config at 288, num_lines at
+# 560 and fd at 588. struct gpio_v2_line_values is 16. Every field is
+# fixed-width and __aligned_u64, so the layout is the same on 32-bit ARM.
 GPIO_V2_GET_LINE_IOCTL = 0xC250B407
 GPIO_V2_LINE_GET_VALUES_IOCTL = 0xC010B40E
 GPIO_V2_LINE_SET_VALUES_IOCTL = 0xC010B40F
@@ -88,10 +80,9 @@ _spi = None
 
 
 def _bank0_base():
-    """sysfs numbering base for GPIO bank 0, or None if sysfs is absent.
+    """sysfs number of GPIO bank 0 line 0, or None without sysfs.
 
-    Only needed to clean up stale exports; the lines themselves are addressed
-    by offset through the character device.
+    Used only to remove stale sysfs exports.
     """
     chips = []
     for d in sorted(glob.glob("/sys/class/gpio/gpiochip*")):
@@ -112,12 +103,10 @@ def _bank0_base():
 
 
 def _release_sysfs(offsets):
-    """Drop any leftover /sys/class/gpio export of the lines we want.
+    """Unexport any /sys/class/gpio export of the lines we need.
 
-    An exported sysfs GPIO holds its line, so GPIO_V2_GET_LINE returns EBUSY.
-    Scripts that export through sysfs and are killed with Ctrl-C leave the
-    export behind, which makes the next run fail for a reason that has nothing
-    to do with the panel.
+    A sysfs export holds its line, and GPIO_V2_GET_LINE then fails with EBUSY.
+    A sysfs script killed with Ctrl-C leaves its exports behind.
     """
     base = _bank0_base()
     if base is None:
@@ -137,7 +126,7 @@ def _release_sysfs(offsets):
 
 
 def _holder(offset):
-    """Who holds a line, from debugfs, for a useful error message."""
+    """The debugfs line describing who holds a GPIO line, for errors."""
     try:
         with open("/sys/kernel/debug/gpio") as f:
             text = f.read()
@@ -163,8 +152,7 @@ def _request_lines(offsets, flags, consumer):
     except OSError as e:
         if e.errno != errno.EBUSY:
             raise
-        # Name the line that is actually taken, and who has it, instead of
-        # reporting EBUSY for the whole set.
+        # Probe each line so the error names the busy one and its holder.
         busy = []
         for off in offsets:
             one = bytearray(_REQUEST_SIZE)
@@ -209,8 +197,7 @@ def module_init():
         print("epdconfig: released stale sysfs exports: %s"
               % ", ".join("line %d (gpio%d)" % f for f in freed))
 
-    # No bias flag: leave each line's existing bias as the board configured
-    # it, matching how these pins already behave.
+    # No bias flag, so each line keeps the bias the device tree set.
     out_fd = _request_lines(_OUTPUTS, GPIO_V2_LINE_FLAG_OUTPUT, "epd-out")
     in_fd = _request_lines(_INPUTS, GPIO_V2_LINE_FLAG_INPUT, "epd-busy")
     _fds.extend((out_fd, in_fd))
@@ -280,6 +267,5 @@ def spi_writebyte(data):
 
 
 def spi_writebyte2(data):
-    # Upstream exposes this for drivers that send a frame in one go. The 2.7"
-    # V2 driver does not use it, but other panels in the package do.
+    # Not used by the 2.7inch V2 driver. Other upstream panel drivers call it.
     _spi.writebytes2(data)

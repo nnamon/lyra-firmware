@@ -1,19 +1,15 @@
 # Changing the Linux environment
 
-Three routes change what runs on the board. They differ in how long they take
-and in what they can reach.
+The board runs Buildroot, so there's no package manager. You can change it in
+two ways.
 
 | Route | Reaches | Cost |
 | --- | --- | --- |
-| Edit on the running board | Config files, scripts, startup | Seconds, no host setup |
-| Rebuild `rootfs.img` offline | Everything in the root filesystem | Minutes, needs Docker |
-| Rebuild from the SDK | Packages, kernel, device tree, U-Boot | Hours, needs Docker and a 2 GB download |
+| Edit on the running board | Config files, scripts, startup | Seconds |
+| Rebuild from the SDK | Packages, kernel, device tree, U-Boot | Hours the first time, needs Docker and a 2 GB download |
 
-Routes 2 and 3 both run in Docker, so none of this needs a Linux machine.
-
-The board runs Buildroot, so there is no package manager. `apt` and `opkg` do
-not exist, and nothing can be installed at run time. That is why the third
-route exists.
+`rootfs/ubifs.sh` can also repack `rootfs.img` offline, but its output doesn't
+boot. Use it to inspect an image, not to build one.
 
 ## What the images hold
 
@@ -21,32 +17,26 @@ route exists.
 | --- | --- | --- |
 | `uboot.img` | 4 MiB at 4 MiB | U-Boot |
 | `boot.img` | 12 MiB at 8 MiB | Kernel and device tree, as a compressed FIT image |
-| `rootfs.img` | 32 MiB onward, grows | UBI image holding a UBIFS root filesystem |
+| `rootfs.img` | 32 MiB onward | UBI image holding a UBIFS root filesystem |
 
-Kernel modules are in `rootfs.img`, under `/lib/modules`, not in `boot.img`.
-The Zero W config sets `RK_ROOTFS_INSTALL_MODULES=y`, and the post-rootfs hook
-`device/rockchip/common/scripts/post-modules.sh` copies the `.ko` files from
-the kernel build into the root filesystem.
+Kernel modules live in `rootfs.img` under `/lib/modules`, not in `boot.img`.
+A built-in driver change needs only a new `boot.img`. A module change needs a
+new `boot.img` and a new `rootfs.img`, built from the same kernel.
 
-That splits a driver change in two. A built-in driver needs only a new
-`boot.img`. A driver built as a module needs a new `boot.img` for the kernel
-and a new `rootfs.img` for the `.ko` file, and the two have to match.
+## Editing on the running board
 
-## Route 1: edit on the running board
+UBIFS is read-write, so edits survive a reboot. Check `cat /proc/mounts`
+shows `ubi0:rootfs` mounted `rw` before you rely on it.
 
-UBIFS is a read-write filesystem, so edits survive a reboot. Confirm that
-with `cat /proc/mounts` before relying on it; look for `ubi0:rootfs` mounted
-`rw`.
+1. Get a shell. Over USB the board is an RNDIS adapter at `192.168.123.100`.
+   Over UART, use the console on the pin header.
+2. Edit with `vi` or `nano`.
+3. Add a startup script as `/etc/init.d/S99name` and `chmod +x` it. BusyBox
+   init runs `/etc/init.d/S*` in name order.
+4. Reboot and check the change is still there.
 
-1. Get a shell. Over USB the board appears as an RNDIS network adapter at
-   `192.168.123.100`. Over UART, use the console on the pin header.
-2. Edit what you need. `vi` and `nano` are both present.
-3. Add a startup script as `/etc/init.d/S99name`, then `chmod +x` it. BusyBox
-   init runs `/etc/init.d/S*` in name order, so the number sets the order.
-4. Reboot to check it survives.
-
-This route cannot add a program that is not already installed. Cross-compile
-instead. `rootfs/cross/` does that in Docker without the SDK:
+You can't install a program this way, but you can copy one over.
+`rootfs/cross/` cross-compiles in Docker without the SDK:
 
 ```sh
 cd rootfs/cross
@@ -55,87 +45,17 @@ cd rootfs/cross
 scp hello root@192.168.123.100:/root
 ```
 
-The board runs glibc 2.38, and a binary needing a newer symbol version loads
-and then dies. `check` catches that, along with a wrong architecture or
-interpreter. `rootfs/cross/README.md` has the target ABI and the
-glibc rule.
+The board has glibc 2.38. A binary that needs a newer symbol version loads and
+then dies. `check` catches that, plus a wrong architecture or interpreter.
+`rootfs/cross/README.md` has the target ABI.
 
-If you have the SDK unpacked, its own toolchain works too, at
+The SDK's own toolchain also works, at
 `prebuilts/gcc/linux-x86/arm/gcc-arm-10.3-2021.07-x86_64-arm-none-linux-gnueabihf/bin`.
 
-## Route 2: rebuild rootfs.img offline
+## Rebuilding from the SDK
 
-This changes any file in the root filesystem without building anything from
-source, and it works on macOS. See `rootfs/README.md` for the
-commands and for why the tree has to live in a Docker volume.
-
-Use it to ship a set of config changes as a flashable image, or to prepare a
-board before it ever boots. It can also drop in a `.ko` module you built
-elsewhere, or a program you cross-compiled with `rootfs/cross/`. It
-cannot add packages, and it cannot change the kernel itself.
-
-## Route 3: rebuild from the SDK
-
-This is the only route that adds packages, changes the kernel config, or
-changes the device tree.
-
-It follows Luckfox's own pages for the Lyra, moved into a container:
-[SDK image compilation](https://wiki.luckfox.com/Luckfox-Lyra/SDK-Image-Compilation),
-[Buildroot configuration](https://wiki.luckfox.com/Luckfox-Lyra/Buildroot-Configuration)
-and [Device tree](https://wiki.luckfox.com/Luckfox-Lyra/Device-Tree).
-Take the Lyra pages rather than the Pico ones: the Pico Pro Max page gives the
-menuconfig target as `buildrootconfig`, which this SDK does not accept, and
-warns about uClibc, which this board does not use.
-
-`sdk/` runs it in Docker. `sdk/README.md` has the setup, the
-disk and time budget, and the two constraints that decide the design: the SDK
-must sit on an ext4 filesystem, so the source lives in a Docker volume, and
-the container must be amd64, because the SDK ships x86_64 host tools.
-
-```sh
-cd sdk
-./sdk.sh init ~/Downloads/luckfox-lyra-241213.tar.gz
-./sdk.sh build
-./sdk.sh fetch
-```
-
-The tarball is a `repo` mirror, not a source tree, so `init` unpacks it and
-then runs `.repo/repo/repo sync -l` to check the tree out before anything can
-build.
-
-It then selects
-`device/rockchip/.chips/rk3506/luckfox_lyra_zero-w_buildroot_spinand_defconfig`,
-the Zero W on SPI NAND with Buildroot, the same as `lunch` options 4, 1 and 0.
-Its `parameter-lyra-spinand.txt` is byte for byte the `parameter.txt` in
-the repository, which is how we know this is the config that built the firmware
-on your board. An older SDK release may not carry that defconfig, in which
-case `init` lists the ones it has and stops.
-
-Get the SDK tarball from Luckfox's Google Drive:
-<https://drive.google.com/drive/folders/1l2ixhfw53J3eZunyvHMnw2DYViH9d8Cx>
-
-The targets, which `./sdk.sh build <target>` passes straight through:
-
-| Target | Output | Use it for |
-| --- | --- | --- |
-| `buildroot-config` | updates the Buildroot defconfig | Adding or removing packages |
-| `rootfs` | `rockdev/rootfs.img` | Any root filesystem change |
-| `kernel-config` | updates the kernel defconfig | Drivers, kernel options |
-| `kernel` | `rockdev/boot.img` | Kernel or device tree changes |
-| `uboot` | `rockdev/uboot.img`, `rockdev/MiniLoaderAll.bin` | Boot changes |
-| `firmware` | packs `rockdev/` | Producing a full set |
-| no target | everything | A first build |
-
-`./sdk.sh fetch` copies `uboot.img`, `boot.img` and `rootfs.img` out of
-`rockdev/` into `images/`, where `build.sh` expects them.
-It leaves the vendor `MiniLoaderAll.bin` and `parameter.txt` alone, because
-the top-level `README.md` builds from the vendor image and keeps the vendor
-loader. `./sdk.sh fetch all` takes the SDK's versions of those too. That is
-what you want after `build uboot`, which is the one target that produces a new
-`MiniLoaderAll.bin`.
-
-From there, write a single partition image with the web tool's Flash tab, or
-pack a whole `update.img`.
+Use this to add packages, change the kernel config or change the device tree.
+[sdk/README.md](../sdk/README.md) has the steps.
 
 ### Where the config lives
 
@@ -149,65 +69,38 @@ pack a whole `update.img`.
 | Device tree, board | `kernel-6.1/arch/arm/boot/dts/rk3506b-luckfox-lyra-zero-w.dts` |
 | Device tree, shared | `kernel-6.1/arch/arm/boot/dts/rk3506-luckfox-lyra-ultra.dtsi` |
 
-### Adding files without patching a package
+### Adding files
 
-Buildroot's overlay mechanism copies a directory tree onto the root filesystem
-at the end of every build, so the files survive a clean rebuild.
-`BR2_ROOTFS_OVERLAY` in the Buildroot config holds the list, and the Lyra
-config already uses it for `board/rockchip/common/base`. Add your own
-directory to that list rather than editing packages.
+Put them in `sdk/config/overlay/` and run `./sdk.sh apply`. Buildroot copies
+the tree onto the root filesystem on every build.
 
-### If a package does not appear after you enable it
+## Enabling SPI, I2C, PWM or a UART
 
-Buildroot skips a package whose build directory already exists. Delete it and
-build again:
-
-```sh
-./sdk.sh shell
-rm -rf buildroot/output/rockchip_rk3506_luckfox/build/<package>-*
-exit
-./sdk.sh build rootfs
-```
-
-## Changing what the board exposes: boot.img
-
-Every driver is built into the vendor kernel, so turning on SPI, I2C, PWM or a
-UART needs no kernel rebuild in principle. It needs one `status` change in the
-device tree inside `boot.img`.
-
-**Build `boot.img` from the SDK.** It packs and signs the FIT the way the
-vendor's was. Repacking the container by hand was tried and produced an image
-that did not boot, so that tooling was removed:
+The vendor kernel has these drivers built in. Enabling one needs a `status`
+change in the device tree, which means a new `boot.img`:
 
 ```sh
 cd sdk
 ./sdk.sh shell          # edit the DTS, then exit
-./sdk.sh build kernel   # produces rockdev/boot.img
+./sdk.sh build kernel
 ./sdk.sh fetch
 ```
 
-The Zero W device tree is `rk3506b-luckfox-lyra-zero-w.dts`, which includes
+Build `boot.img` with the SDK. A FIT repacked by hand doesn't boot. To keep
+the change across `./sdk.sh clean`, save it as a patch in `sdk/config/`.
+
+The Zero W device tree is `rk3506b-luckfox-lyra-zero-w.dts`. It includes
 `rk3506-luckfox-lyra-ultra.dtsi`, shared with the Ultra, Ultra W and Pi. The
-`-sd` variant of that `.dts` is for SD boot, not SPI NAND.
+`-sd` variant is for SD boot, not SPI NAND. The vendor `.dts` enables a DSI
+panel and touch controllers, and nothing on the 40-pin header.
 
-Before reaching for any of it, check whether you need it: a pin that no
-enabled node claims is already usable as GPIO, and a userspace driver on
-those pins cannot stop the board booting.
-
-25 of the 60 nodes in the shipped device tree are disabled, including both
-SPI controllers, five of six UARTs, all ten PWMs, both CAN and both Ethernet.
-That is the Rockchip convention, not a fault: the SoC `.dtsi` disables
-everything and each board's `.dts` enables what it wires. This board's `.dts`
-calls itself `rockchip,rk3506g-demo-display-control` and enables a DSI panel
-and three touch controllers, so nothing on the 40-pin header is configured.
-
-To see what a running board has claimed, read `/sys/kernel/debug/pinctrl/`,
-which `/info/pinctrl` links to.
+You may not need a firmware change at all. A pin that no enabled node claims
+is already usable as GPIO. Check `/sys/kernel/debug/pinctrl/` on the running
+board to see what's claimed.
 
 ## WiFi on the Zero W
 
-`wlan0` comes up `NO-CARRIER` until it associates. The onboard antenna needs
-GPIO 55 driven high first.
+`wlan0` stays `NO-CARRIER` until the antenna GPIO is driven high:
 
 ```sh
 echo 55 > /sys/class/gpio/export
@@ -217,6 +110,9 @@ wifi-connect.sh <SSID> <password>
 udhcpc -i wlan0
 ```
 
-Those settings are lost on reboot. To keep them, put the same commands in
-`/etc/init.d/S99wlan0` with a `sleep 5` first, make it executable, and either
-edit the running board or ship the script through `rootfs/files/`.
+`55` is a sysfs number on the vendor device tree. Sysfs numbers move when the
+device tree changes, so check `/sys/kernel/debug/gpio` on other builds.
+
+The setting is lost on reboot. To keep it, put the commands in
+`/etc/init.d/S99wlan0` with a `sleep 5` first. Add the script on the running
+board, or ship it in `sdk/config/overlay/etc/init.d/`.

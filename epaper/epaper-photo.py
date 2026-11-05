@@ -8,7 +8,7 @@ The gallery is photos/. Only the sample is committed; prep-photo.py fills
 the rest.
 
     python3 epaper-photo.py                     # the whole gallery, once
-    python3 epaper-photo.py --loop              # ... round and round
+    python3 epaper-photo.py --loop              # repeat forever
     python3 epaper-photo.py --list              # what is in photos/
     python3 epaper-photo.py lenna               # one of them
     python3 epaper-photo.py lenna sleeve        # those two in turn
@@ -20,20 +20,18 @@ the rest.
     python3 epaper-photo.py --bw                # 1-bit, for comparison
     python3 epaper-photo.py --clear
 
-Two numbers that are easy to confuse, and must not be:
+The driver and the dither use different numbers for the four levels:
 
-  CODES  what getbuffer_4Gray keeps distinct: 0x00, 0x80, 0xC0, 0xFF. These
-         are register values. It reads the top two bits and remaps 0xC0->0x80
-         and 0x80->0x40, so an even 0/85/170/255 ramp collapses two levels.
+  CODES  the register values getbuffer_4Gray keeps distinct: 0x00, 0x80,
+         0xC0, 0xFF. It reads the top two bits and remaps 0xC0->0x80 and
+         0x80->0x40, so an even 0/85/170/255 ramp loses two levels.
 
-  LOOKS  what those four levels actually look like on glass, 0..255. Error
-         diffusion must use THESE, because the error pushed into neighbouring
-         pixels is a perceptual error, not a register one.
+  LOOKS  how grey each level looks on the panel, 0-255. Error diffusion uses
+         these, because the error it spreads is a brightness error.
 
-LOOKS defaults to an even ramp, which is an assumption rather than a
-measurement -- run epaper-levels.py to see the real spacing. If the picture
-comes out too dark, the panel's greys are darker than the default claims:
-lower the middle two numbers, or just raise --gamma's effect by lowering it.
+LOOKS defaults to an even ramp, which isn't measured. Run epaper-levels.py to
+see the real spacing. If pictures come out too dark, lower the middle two
+LOOKS values or lower --gamma.
 """
 
 import argparse
@@ -94,8 +92,8 @@ def refit(img, how):
 def source(name, gamma, how):
     img = Image.open(resolve(name))
     if img.mode in ("RGBA", "LA", "P"):
-        # Composite onto white first: convert("L") on RGBA drops alpha and
-        # leaves transparent areas as whatever colour hid under them.
+        # convert("L") drops alpha and shows whatever colour sits under
+        # transparent pixels, so composite onto white first.
         img = img.convert("RGBA")
         img = Image.alpha_composite(
             Image.new("RGBA", img.size, (255, 255, 255, 255)), img)
@@ -108,12 +106,10 @@ def source(name, gamma, how):
     return img
 
 
-# Error-diffusion kernels: (dx, dy, weight). Floyd-Steinberg spreads all of
-# the error over 4 neighbours. Atkinson spreads only 6/8 of it over 6, and
-# throws the remaining quarter away -- that loss is the point, it stops error
-# smearing across flat areas, so highlights and shadows stay clean and the
-# result reads as higher contrast with less crawling texture. It was written
-# for 1-bit Macs and suits e-paper for the same reason.
+# Error-diffusion kernels: (dx, dy, weight). Floyd-Steinberg spreads all the
+# error over 4 neighbours. Atkinson spreads 6/8 of it over 6 and drops the
+# rest. Dropping it stops error smearing across flat areas, so highlights and
+# shadows stay clean.
 KERNELS = {
     "atkinson": (((1, 0), 0.125), ((2, 0), 0.125),
                  ((-1, 1), 0.125), ((0, 1), 0.125), ((1, 1), 0.125),
@@ -135,7 +131,7 @@ def dither(img, looks, kernel="atkinson"):
     px = [float(v) for v in img.getdata()]
     out = bytearray(W * H)
     n = len(looks)
-    # Midpoints between adjacent levels, so the choice honours real spacing.
+    # Quantise at the midpoints between LOOKS, so uneven spacing counts.
     cuts = [(looks[i] + looks[i + 1]) / 2.0 for i in range(n - 1)]
     last = n - 1
     for y in range(H):
@@ -172,7 +168,7 @@ def show(epd, name, a, looks):
         print("%s: 1-bit, %s, gamma=%.2f, dithered in %.1fs"
               % (name, a.dither, gamma, time.time() - t0), flush=True)
         if epd.init() != 0:
-            sys.exit("init failed -- is /dev/spidev1.0 there?")
+            sys.exit("init failed. Is /dev/spidev1.0 there?")
         epd.display(epd.getbuffer(out.convert("1")))
     else:
         idx = dither(img, looks, a.dither)
@@ -184,9 +180,9 @@ def show(epd, name, a, looks):
         print("%s: 4 grey levels, %s, gamma=%.2f, looks=%s, dithered in %.1fs"
               % (name, a.dither, gamma, looks, time.time() - t0), flush=True)
         print("  level counts: %s" % hist, flush=True)
-        # 4Gray needs its own init: a different waveform and LUT.
+        # 4-grey mode has its own waveform, so it needs Init_4Gray.
         if epd.Init_4Gray() != 0:
-            sys.exit("Init_4Gray failed -- is /dev/spidev1.0 there?")
+            sys.exit("Init_4Gray failed. Is /dev/spidev1.0 there?")
         epd.display_4Gray(epd.getbuffer_4Gray(out))
 
 
@@ -195,7 +191,7 @@ def main():
     ap.add_argument("image", nargs="*",
                     help="gallery name or file path (default: all of photos/)")
     ap.add_argument("--list", action="store_true", help="print the gallery and exit")
-    ap.add_argument("--loop", action="store_true", help="keep going round")
+    ap.add_argument("--loop", action="store_true", help="repeat forever")
     ap.add_argument("--pause", type=float, default=6.0,
                     help="seconds a picture stays up when there is more than one")
     ap.add_argument("--fit", default="contain", choices=("contain", "cover"),
@@ -203,7 +199,7 @@ def main():
     ap.add_argument("--gamma", type=float, default=None,
                     help="below 1 brightens, above 1 darkens (default: per image)")
     ap.add_argument("--looks", default="0,85,170,255",
-                    help="how the four levels actually look (default even)")
+                    help="how grey each level looks, 0-255 (default even ramp)")
     ap.add_argument("--dither", default="atkinson",
                     help="atkinson (default), floyd, sierra or none")
     ap.add_argument("--bw", action="store_true", help="1-bit instead of 4 levels")
@@ -241,7 +237,8 @@ def main():
             for i, name in enumerate(names):
                 show(epd, name, a, looks)
                 if a.loop or i < len(names) - 1:
-                    # The panel must not sit biased. show() re-inits.
+                    # Waveshare says not to leave the panel powered. show()
+                    # re-inits for the next picture.
                     epd.sleep()
                     time.sleep(a.pause)
             if not a.loop:

@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
-"""Show the panel's four grey levels as bands, to measure their reflectance.
+"""Show the panel's four grey levels as labelled bands.
 
-Dithering onto a palette needs the levels' real appearance, not the code
-values the encoder happens to use. getbuffer_4Gray wants 0x00, 0x80, 0xC0 and
-0xFF, but those are register codes -- what they look like on glass is a
-property of the waveform and the ink, and the spacing is not the same.
-
-This writes four labelled bands so you can see the actual spacing. Feed what
-you see back into LOOKS in mkassets.py and the error diffusion will target the
-levels the panel really produces.
+getbuffer_4Gray takes the codes 0x00, 0x80, 0xC0 and 0xFF. How grey each one
+looks depends on the waveform and the ink, so the spacing isn't even. Look at
+the bands, then pass what you see to epaper-photo.py as --looks.
 
     python3 epaper-levels.py            # four horizontal bands
     python3 epaper-levels.py --ramp     # bands plus a dithered 0-100% ramp
@@ -32,7 +27,7 @@ def bands():
     bh = H // len(CODES)
     for i, code in enumerate(CODES):
         d.rectangle([0, i * bh, W, (i + 1) * bh - 1], fill=code)
-        # label in the opposite extreme so it stays readable
+        # White text on dark bands, black on light.
         d.text((6, i * bh + 6), NAMES[i], fill=0xFF if code < 0x90 else 0x00)
     return img
 
@@ -47,9 +42,8 @@ def ramp():
         d.rectangle([0, i * bw, W, (i + 1) * bw - 1], fill=code)
         d.text((6, i * bw + 4), NAMES[i], fill=0xFF if code < 0x90 else 0x00)
 
-    # Floyd-Steinberg a linear sweep onto the four codes, treating the codes
-    # as if evenly spaced. If the panel's levels are not evenly spaced, the
-    # sweep will visibly bunch up -- which is the thing worth seeing.
+    # Dither a linear sweep as if the four levels were evenly spaced. Uneven
+    # levels show as bunching in the sweep.
     sw, sh = W, H - top
     px = [255.0 * x / (sw - 1) for y in range(sh) for x in range(sw)]
     out = [0] * (sw * sh)
@@ -79,13 +73,13 @@ def main():
     img = ramp() if a.ramp else bands()
     epd = epd2in7_V2.EPD()
     if epd.Init_4Gray() != 0:
-        sys.exit("Init_4Gray failed -- is /dev/spidev1.0 there?")
+        sys.exit("Init_4Gray failed. Is /dev/spidev1.0 there?")
     epd.display_4Gray(epd.getbuffer_4Gray(img))
     epd.sleep()
-    print("shown. Judge the spacing of the four bands:")
-    print("  evenly spaced      -> LOOKS = [0, 85, 170, 255]")
-    print("  greys near white   -> raise the two middle numbers")
-    print("  greys near black   -> lower them")
+    print("Shown. Compare the four bands, then set epaper-photo.py --looks:")
+    print("  evenly spaced      --looks 0,85,170,255")
+    print("  greys near white   raise the two middle numbers")
+    print("  greys near black   lower the two middle numbers")
     return 0
 
 

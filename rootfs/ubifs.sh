@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Take a Lyra rootfs.img apart, change it, and put it back together.
+# Unpack a Lyra rootfs.img for inspection. Images from `pack` don't boot.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -7,8 +7,7 @@ TOOLS_IMAGE=lyra-ubi-tools
 VOLUME=${LYRA_ROOTFS_VOLUME:-lyra-rootfs}
 TREE=/work/tree
 
-# Geometry of the vendor rootfs.img, read out of the Luckfox Lyra SDK rather
-# than guessed. Sources, so you can check them:
+# Geometry of the vendor rootfs.img, from the Luckfox Lyra SDK:
 #   LEB, sub-page        buildroot/configs/rockchip/fs/ubifs.config
 #   min I/O, PEB         buildroot/fs/ubifs/Config.in, buildroot/fs/ubi/Config.in
 #   max LEB count        1024 MiB / 126976, from BR2_TARGET_ROOTFS_UBIFS_MAX_SIZE
@@ -79,9 +78,9 @@ cmd_apply() {
     [ -d "$TREE" ] || { echo "no tree yet; run unpack first" >&2; exit 1; }
     n=$(find /overlay -mindepth 1 ! -type d ! -name .gitkeep | wc -l)
     if [ "$n" -eq 0 ]; then echo "files/ is empty, nothing to apply"; exit 0; fi
-    # --no-same-owner makes the copied files root-owned without touching the
-    # rest of the tree. A recursive chown here would clear every setuid bit
-    # in the image, which is how you get a rootfs where su no longer works.
+    # --no-same-owner makes the copied files root-owned and leaves the rest of
+    # the tree alone. A recursive chown clears every setuid bit, and su stops
+    # working.
     tar -C /overlay --exclude=.gitkeep -cf - . \
       | tar -C "$TREE" -xv --no-same-owner -f -
     echo "applied $n files from files/, owned by root"
@@ -131,9 +130,9 @@ cmd_roundtrip() {
     echo "in  $(stat -c %s /in/img) bytes"
     echo "out $(stat -c %s /work/rt/rootfs.ubi) bytes"
 
-    # Metadata of every entry, and content of the ones that have any. diff -r
-    # is no use here: it calls two identical device nodes different, because it
-    # will not compare special files at all.
+    # Compare metadata of every entry and content of regular files. diff -r
+    # reports identical device nodes as different, because it skips special
+    # files.
     meta() { ( cd "$1" && find . -print0 | sort -z \
       | xargs -0 stat -c "%n type=%F mode=%A owner=%u:%g size=%s dev=%t:%T links=%h" ); }
     content() { ( cd "$1" \
@@ -150,6 +149,7 @@ cmd_roundtrip() {
       n=$(wc -l < /work/rt/a.meta)
       echo "round trip: $n entries identical, including modes, owners,"
       echo "link counts, device numbers, symlink targets and file contents"
+      echo "This doesn't show the image boots. Repacked images currently don't."
     else
       echo "round trip: DIFFERENT, see above" >&2
     fi
@@ -167,13 +167,12 @@ Usage: ./ubifs.sh <command> [args]
   unpack <rootfs.img>      extract it into the work volume at tree/
   shell                    root shell in the work volume, for editing the tree
   apply                    copy files/ over the tree, owned by root
-  pack [out.img]           build a UBI image from the work volume
+  pack [out.img]           build a UBI image from the work volume (doesn't boot)
   roundtrip <rootfs.img>   unpack, repack, re-extract, compare the two trees
   clean                    delete the work volume
 
-The tree lives in a Docker volume, not on this filesystem, because macOS
-cannot store device nodes, setuid bits or root ownership. Editing it anywhere
-else silently breaks the image.
+The tree lives in a Docker volume because a macOS directory silently drops
+device nodes, setuid bits and root ownership.
 USAGE
   exit 1
 }

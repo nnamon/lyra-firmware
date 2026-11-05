@@ -7,7 +7,7 @@ TOOLS_IMAGE=lyra-cross-tools
 TRIPLE=arm-linux-gnueabihf
 ROOTFS_VOLUME=${LYRA_ROOTFS_VOLUME:-lyra-rootfs}
 
-# Measured from the board's own busybox: ELF32 ARM, EABI5, hard-float,
+# From the board's own busybox: ELF32 ARM, EABI5, hard-float,
 # Tag_CPU_arch v7, Tag_FP_arch VFPv4, Tag_ABI_VFP_args VFP registers.
 # RK3506B is a Cortex-A7, which is armv7-a with NEON and VFPv4.
 TARGET_FLAGS="-march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard"
@@ -126,8 +126,7 @@ Usage: ./cross.sh <command> [args]
   run <binary>     run it under emulation against the unpacked rootfs
   shell            shell with the cross tools on PATH
 
-Compile in your own source directory, then install into the image by copying
-into ../files/ and running ../ubifs.sh apply.
+Compile in your own source directory, then scp the binary to the board.
 
 Target: armv7-a, hard float, VFPv4, glibc $TARGET_GLIBC.
 USAGE

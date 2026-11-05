@@ -6,13 +6,13 @@
     ./prep-photo.py --fit cover ~/pics/*.jpg        # crop to fill, not pad
     ./prep-photo.py --plain ~/pics/scan.png         # no autocontrast
 
-epaper-photo.py fits a full-size file itself, so this is optional. Doing it
-here makes what the board stores 10-20 KB instead of megabytes.
+epaper-photo.py can fit a full-size file itself. Preparing first keeps each
+picture on the board to 10-20 KB.
 
-Autocontrast unless --plain: four grey levels cannot spare any of the range.
-Baked in here, so --gamma stays free as a display-time tweak.
+Applies autocontrast unless --plain, because four grey levels can't spare any
+of the range. epaper-photo.py --gamma then adjusts on top.
 
-photos/ is gitignored bar the sample. This repository is public.
+Git ignores photos/ except the sample, because this repo is public.
 """
 
 import argparse
@@ -29,8 +29,8 @@ PHOTOS = os.path.join(HERE, "photos")
 def prepare(path, how, autocontrast):
     img = Image.open(path)
     if img.mode in ("RGBA", "LA", "P"):
-        # Composite onto white first: convert("L") on RGBA drops alpha and
-        # leaves transparent areas as whatever colour hid under them.
+        # convert("L") drops alpha and shows whatever colour sits under
+        # transparent pixels, so composite onto white first.
         img = img.convert("RGBA")
         img = Image.alpha_composite(
             Image.new("RGBA", img.size, (255, 255, 255, 255)), img)

@@ -2,15 +2,14 @@
 #
 # S99epaper    Draws on the 2.7inch e-Paper HAT at boot.
 #
-# S99 so it runs last, once udev has made /dev/spidev1.0 and /dev/gpiochip0.
-# Exits by itself if no panel answers, so a board with nothing attached boots
-# normally.
+# S99 runs last, after udev creates /dev/spidev1.0 and /dev/gpiochip0. The
+# demo runs in the background, so a board without a panel still boots.
 
 DIR=/usr/share/epaper
 SCRIPT=epaper-show.py
 ARGS="--mode partial"
 
-# Source first, so /etc/default/epaper can choose a different SCRIPT.
+# Read the defaults before the check, so they can change SCRIPT.
 [ -r /etc/default/epaper ] && . /etc/default/epaper
 [ -f "$DIR/$SCRIPT" ] || exit 0
 

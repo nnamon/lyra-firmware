@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
-"""Diagnose an unresponsive 2.7inch e-Paper HAT on a Luckfox Lyra Zero W.
+"""Check a blank 2.7inch e-Paper HAT on a Luckfox Lyra Zero W, step by step.
 
-Timings and the command sequence follow Waveshare's own epd2in7_V2 driver:
-reset is 200 ms / low 2 ms / 200 ms settle, BUSY is HIGH while the panel is
-working, SPI is mode 0 at 4 MHz.
+Timing and commands follow Waveshare's epd2in7_V2 driver: RST high 200 ms, low
+2 ms, high 200 ms. BUSY is high while the panel works. SPI is mode 0 at 4 MHz.
 
-Stages, each isolating one thing:
+Stages:
 
-  0. Is BUSY stable when nothing is happening?
-  1. GPIO only, no SPI. Reset the panel and trace BUSY throughout. A live
-     panel asserts BUSY during its power-on.
-  2. One byte over spidev: SWRESET. Tests the data path alone.
-  3. Full init plus an all-black frame, with the refresh timed.
-  4. Sweep every free GPIO during a refresh, in case BUSY is not on gpio 12.
+  0. BUSY at rest. It should stay steady.
+  1. Reset over GPIO only, tracing BUSY. A live panel asserts BUSY during
+     power-on.
+  2. SWRESET over spidev. Tests the SPI data path.
+  3. Init and an all-black frame, with the refresh timed.
+  4. Watch every free GPIO during a refresh, in case BUSY isn't on line 12.
 
-Run on the board:  python3 epaper-diag.py
+Run it on the board as root:  python3 epaper-diag.py
 """
 
 import fcntl
@@ -34,13 +33,10 @@ SPI_IOC_WR_MAX_SPEED_HZ = 0x40046B04
 W, H = 176, 264
 FB = (W // 8) * H
 
-# --- sysfs GPIO numbering ------------------------------------------------
-# /sys/class/gpio/gpioN numbers are a global allocation handed out in gpiochip
-# probe order, not a stable property of a pin. Enabling an SPI controller can
-# reorder probing and shift every number, which silently points RST, DC, PWR
-# and BUSY at the wrong pins while CLK/MOSI/CS keep working because pinctrl
-# muxes those by name. So the PIN table below holds bank-0 offsets, which are
-# stable, and the sysfs number is resolved at run time.
+# The kernel assigns /sys/class/gpio numbers in probe order. Enabling spi1
+# shifts them, which moves RST, DC, PWR and BUSY onto the wrong pins while the
+# spi1 pins keep working. PIN holds bank-0 offsets; main() converts them to
+# sysfs numbers.
 
 def gpiochips():
     out = []
@@ -71,7 +67,7 @@ def bank0_base():
     for label, base, _, _ in chips:
         if label == "gpio0":
             return base
-    # Older kernels label banks by DT node name; take the lowest-based 32-pin chip.
+    # Some kernels label banks by DT node name. Take the lowest 32-line chip.
     banks = sorted(b for _, b, n, _ in chips if n == 32)
     return banks[0] if banks else 0
 
@@ -169,9 +165,8 @@ def main():
     print()
 
     print("Stage 1: reset, GPIO only (Waveshare timing)")
-    # Trace across the whole sequence: assert RST in a thread-free way by
-    # driving it between short traces, so an assertion during the low pulse
-    # or the settle is not missed.
+    # Trace BUSY between each RST step, so an assertion during the low pulse
+    # or the settle shows up.
     wr(rst, 1)
     trace(busy, 0.2, "RST high, settle")
     wr(rst, 0)
@@ -233,7 +228,7 @@ def main():
     print()
 
     print("Stage 4: sweep every free GPIO during a refresh")
-    # If BUSY is not really on gpio 12, some other pin will move here.
+    # If BUSY isn't on line 12, the real BUSY line changes during the refresh.
     others = {}
     for num in range(0, 32):
         if num in SPI_CLAIMED or num in PIN.values():
@@ -277,9 +272,9 @@ def main():
                    ("0x20 refresh", stage3)):
         print("  %-14s %s" % (n_, "BUSY responded" if ok else "no response"))
     print()
-    print("  Did the screen turn black? That answers more than BUSY does:")
-    print("    black  -> SPI works, only BUSY sensing is wrong")
-    print("    blank  -> SPI is not reaching the panel")
+    print("  Check the screen:")
+    print("    black  SPI works. If BUSY showed no response, BUSY sensing is wrong.")
+    print("    blank  SPI isn't reaching the panel.")
     os.close(fd)
     return 0
 
