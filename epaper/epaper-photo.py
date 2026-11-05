@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """Show pictures on the 2.7inch e-Paper HAT, dithered on the board.
 
-Waveshare's driver does all the panel work. This file reads a picture,
-dithers it on the board (about a second each), and hands the result over.
-Dithering defaults to Atkinson.
+Waveshare's driver does the panel work. This reads a picture, dithers it on
+the board (about a second each) and hands it over. Atkinson by default.
 
-The gallery is whatever is in photos/, which is gitignored: this repository
-is public, your pictures are not. prep-photo.py fills it.
+The gallery is photos/. Only the sample is committed; prep-photo.py fills
+the rest.
 
     python3 epaper-photo.py                     # the whole gallery, once
     python3 epaper-photo.py --loop              # ... round and round
     python3 epaper-photo.py --list              # what is in photos/
-    python3 epaper-photo.py loveless            # one of them
-    python3 epaper-photo.py souvlaki duo        # those two in turn
+    python3 epaper-photo.py lenna               # one of them
+    python3 epaper-photo.py lenna sleeve        # those two in turn
     python3 epaper-photo.py pic.jpg             # any file, fitted to 176x264
     python3 epaper-photo.py --gamma 1.3         # darker
     python3 epaper-photo.py --looks 0,70,150,255
@@ -53,9 +52,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PHOTOS = os.path.join(HERE, "photos")
 EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
 
-# prep-photo.py autocontrasts what it writes, so a prepared picture wants a
-# neutral 1.0. Anything that still looks wrong on glass gets an entry here;
-# --gamma overrides it.
+# prep-photo.py autocontrasts, so prepared pictures want 1.0. Exceptions go
+# here; --gamma overrides.
 GAMMA = {"photo": 0.8, "loveless": 1.3}
 
 
@@ -243,8 +241,7 @@ def main():
             for i, name in enumerate(names):
                 show(epd, name, a, looks)
                 if a.loop or i < len(names) - 1:
-                    # Sleeping between pictures matters: the panel must not
-                    # sit biased, and show() re-inits before the next one.
+                    # The panel must not sit biased. show() re-inits.
                     epd.sleep()
                     time.sleep(a.pause)
             if not a.loop:

@@ -12,7 +12,7 @@ ours.
 | `epaper-show.py` | nine animated scenes |
 | `epaper-photo.py` | pictures in 4 grey levels or 1 bit, dithered on the board |
 | `prep-photo.py` | fits a picture to 176x264 greyscale, on your machine |
-| `photos/` | the gallery. Gitignored: this repository is public |
+| `photos/` | the gallery. Only the sample is committed |
 | `epaper-levels.py` | the four grey levels as bands, for calibration |
 | `epaper-diag.py` | staged hardware diagnosis when nothing appears |
 | `epaper-demo.py` | older, self-contained, bit-bangs SPI from GPIO |
@@ -54,23 +54,20 @@ python3 epaper-levels.py                # calibration bands
 
 ## The gallery
 
-`photos/` ships empty, and its `.gitignore` keeps it that way: this
-repository is public and your pictures are not. Fill it on your machine.
+`photos/` holds the pictures. Only `lenna.png` is committed, the
+`.gitignore` excludes the rest: this repository is public.
 
 ```sh
 ./prep-photo.py ~/pics/*.jpg          # -> photos/<name>.png, 176x264 grey
 ./prep-photo.py --fit cover tall.jpg  # crop to fill instead of padding
-./prep-photo.py --plain scan.png      # leave the tones alone
+./prep-photo.py --plain scan.png      # no autocontrast
 ```
 
-`epaper-photo.py` will open a full-size file directly and fit it on the
-board, so `prep-photo.py` is a convenience, not a requirement. It earns its
-place by making the copy on the board 10-20 KB instead of megabytes, and by
-baking the contrast decision in once rather than every refresh.
+Optional: `epaper-photo.py` fits a full-size file itself. Preparing first
+makes the copy on the board 10-20 KB instead of megabytes.
 
-Contrast is a prep-time decision for that reason: prepared pictures are
-autocontrasted and want a neutral gamma. `GAMMA` in `epaper-photo.py` holds
-per-picture exceptions, and `--gamma` overrides both.
+Prepared pictures are autocontrasted, so they want gamma 1.0. `GAMMA` in
+`epaper-photo.py` holds the exceptions, `--gamma` overrides.
 
 ## Wiring
 

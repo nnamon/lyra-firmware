@@ -1,22 +1,18 @@
 #!/usr/bin/env python3
-"""Fit pictures to the panel and write them to photos/, ready to copy over.
+"""Fit pictures to the panel: 176x264 8-bit greyscale PNGs in photos/.
 
     ./prep-photo.py ~/pics/sleeve.jpg               # -> photos/sleeve.png
     ./prep-photo.py --name cover ~/pics/sleeve.jpg
     ./prep-photo.py --fit cover ~/pics/*.jpg        # crop to fill, not pad
-    ./prep-photo.py --plain ~/pics/scan.png         # leave the tones alone
+    ./prep-photo.py --plain ~/pics/scan.png         # no autocontrast
 
-Output is a 176x264 8-bit greyscale PNG, 10-20 KB each, so a whole gallery
-costs the board less than one JPEG. epaper-photo.py can open a full-size
-file and do this itself, but then the board stores and rescales the original
-every single time.
+epaper-photo.py fits a full-size file itself, so this is optional. Doing it
+here makes what the board stores 10-20 KB instead of megabytes.
 
-Autocontrast is on unless --plain: a photographed or screen-grabbed picture
-usually fills only part of the range, and four grey levels cannot afford to
-waste any of it. It is baked in here rather than applied at display time so
-that what you prepare is what you get, leaving --gamma free as a tweak.
+Autocontrast unless --plain: four grey levels cannot spare any of the range.
+Baked in here, so --gamma stays free as a display-time tweak.
 
-photos/ is gitignored. This repository is public; your pictures are not.
+photos/ is gitignored bar the sample. This repository is public.
 """
 
 import argparse

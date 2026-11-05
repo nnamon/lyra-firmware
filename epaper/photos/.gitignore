@@ -2,3 +2,5 @@
 # in here is committed. prep-photo.py fills this directory.
 *
 !.gitignore
+!lenna.png
+!README.md
